@@ -4,6 +4,14 @@ import smtplib, ssl
 import os
 import time
 import sqlite3
+import os
+import typing
+from dotenv import load_dotenv
+
+load_dotenv()
+MAIL_PASSWORD: typing.Final = os.getenv("MAIL_PASSWORD")
+MAIL_USER: typing.Final = os.getenv("MAIL_USER")
+MAIL_RECEIVER: typing.Final = os.getenv("MAIL_RECEIVER")
 
 "INSERT INTO events VALUES ('Tigers', 'Tiger City', '2088.10.14')"
 "SELECT * FROM events WHERE date='2088.10.15'"
@@ -14,62 +22,67 @@ HEADERS = {
 
 connection = sqlite3.connect("data.db")
 
-def scrape(url):
-    """Scrape the page source from the URL"""
-    response = requests.get(url, headers=HEADERS)
-    source = response.text
-    return source
+
+class Event:
+    def scrape(self, url):
+        """Scrape the page source from the URL"""
+        response = requests.get(url, headers=HEADERS)
+        source = response.text
+        return source
+
+    def extract(self, source):
+        extractor = selectorlib.Extractor.from_yaml_file("extract.yaml")
+        value = extractor.extract(source)["tours"]
+        return value
 
 
-def extract(source):
-    extractor = selectorlib.Extractor.from_yaml_file("extract.yaml")
-    value = extractor.extract(source)["tours"]
-    return value
+class Email:
+    def send(self, message):
+        host = "smtp.gmail.com"
+        port = 465
+
+        username = MAIL_USER
+        password = MAIL_PASSWORD
+
+        receiver = MAIL_RECEIVER
+        context = ssl.create_default_context()
+
+        with smtplib.SMTP_SSL(host, port, context=context) as server:
+            server.login(username, password)
+            server.sendmail(username, receiver, message)
+        print("Email was sent!")
 
 
-def send_email(message):
-    host = "smtp.gmail.com"
-    port = 465
+class Database:
+    def store(self, extracted):
+        row = extracted.split(",")
+        row = [item.strip() for item in row]
+        cursor = connection.cursor()
+        cursor.execute("INSERT INTO events VALUES(?,?,?)", row)
+        connection.commit()
 
-    username = "app8flask@gmail.com"
-    password = "qyciukmocfaiarse"
-
-    receiver = "app8flask@gmail.com"
-    context = ssl.create_default_context()
-
-    with smtplib.SMTP_SSL(host, port, context=context) as server:
-        server.login(username, password)
-        server.sendmail(username, receiver, message)
-    print("Email was sent!")
-
-
-def store(extracted):
-    row = extracted.split(",")
-    row = [item.strip() for item in row]
-    cursor = connection.cursor()
-    cursor.execute("INSERT INTO events VALUES(?,?,?)", row)
-    connection.commit()
-
-def read(extracted):
-    row = extracted.split(",")
-    row = [item.strip() for item in row]
-    band, city, date = row
-    cursor = connection.cursor()
-    cursor.execute("SELECT * FROM events WHERE band=? AND city=? AND date=?", (band, city, date))
-    rows = cursor.fetchall()
-    print(rows)
-    return rows
+    def read(self, extracted):
+        row = extracted.split(",")
+        row = [item.strip() for item in row]
+        band, city, date = row
+        cursor = connection.cursor()
+        cursor.execute("SELECT * FROM events WHERE band=? AND city=? AND date=?", (band, city, date))
+        rows = cursor.fetchall()
+        print(rows)
+        return rows
 
 
 if __name__ == "__main__":
     while True:
-        scraped = scrape(URL)
-        extracted = extract(scraped)
+        event = Event()
+        scraped = event.scrape(URL)
+        extracted = event.extract(scraped)
         print(extracted)
 
         if extracted != "No upcoming tours":
             row = read(extracted)
             if not row:
                 store(extracted)
-                send_email(message="Hey, new event was found!")
+                email = Email()
+                email.send(message="Hey, new event was found!")
         time.sleep(2)
